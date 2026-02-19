@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react';
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
-  base: '/Report-medicnc/',   // ⭐ 여기 추가
+base: '/Report-medicnc/',
 
   server: {
     port: 3000,
