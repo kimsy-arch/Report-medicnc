@@ -1,0 +1,7 @@
+{
+  "name": "프리미엄 배너 광고 리포트 대시보드",
+  "description": "광고 캠페인 데이터를 시각화하고 AI 분석을 통해 인사이트를 제공하는 고품질 마케팅 리포트 대시보드입니다.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

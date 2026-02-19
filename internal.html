@@ -1,0 +1,251 @@
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>INTERNAL - Report Manager (High-Volume)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        body { font-family: 'Inter', 'Noto Sans KR', sans-serif; background-color: #f8fafc; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .debug-log-area { max-height: 180px; overflow-y: auto; font-family: monospace; font-size: 11px; border-radius: 1rem; }
+    </style>
+    <script type="importmap">
+    {
+      "imports": {
+        "@google/genai": "https://esm.sh/@google/genai@^1.41.0",
+        "react": "https://esm.sh/react@^19.2.4",
+        "react-dom": "https://esm.sh/react-dom@^19.2.4",
+        "react-dom/client": "https://esm.sh/react-dom@^19.2.4/client",
+        "recharts": "https://esm.sh/recharts@^3.7.0",
+        "lucide-react": "https://esm.sh/lucide-react@^0.574.0",
+        "xlsx": "https://esm.sh/xlsx@0.18.5"
+      }
+    }
+    </script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="module">
+        const BUILD_VERSION = "2024.03.23.V1_INTERNAL_PRO";
+        import React, { useState, useEffect, useMemo } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { 
+            BarChart3, Upload, Archive, Play, ChevronDown, ChevronUp, Terminal,
+            TrendingUp, MousePointer2, Target, Loader2, Sparkles, Database, ShieldCheck
+        } from 'lucide-react';
+        import * as XLSX from 'xlsx';
+        import { GoogleGenAI } from "@google/genai";
+
+        const InternalApp = () => {
+            const [logs, setLogs] = useState([]);
+            const [showDebug, setShowDebug] = useState(false);
+            const [excelFile, setExcelFile] = useState(null);
+            const [clientKey, setClientKey] = useState("snow"); // 고정 링크용 ID
+            const [isParsing, setIsParsing] = useState(false);
+            const [isAnalyzing, setIsAnalyzing] = useState(false);
+            const [reportData, setReportData] = useState({
+                summary: { name: "-", advertiser: "-", totalImpressions: 0, totalClicks: 0, avgCtr: 0 },
+                rows: []
+            });
+            const [aiInsight, setAiInsight] = useState("");
+
+            const addLog = (msg) => {
+                setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 30));
+                console.log(`[${BUILD_VERSION}] ${msg}`);
+            };
+
+            const handleFileUpload = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    setExcelFile(file);
+                    addLog(`UPLOAD_CLICK: ${file.name}`);
+                }
+            };
+
+            const runAnalysis = async () => {
+                if (!excelFile) return alert("엑셀 파일을 먼저 업로드하세요.");
+                setIsParsing(true);
+                addLog("ANALYZE_START: Parsing...");
+                
+                try {
+                    const ab = await excelFile.arrayBuffer();
+                    const wb = XLSX.read(ab, { type: 'array' });
+                    const sheet = wb.Sheets[wb.SheetNames[0]];
+                    const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+                    
+                    let hIdx = aoa.findIndex(r => r.join('|').includes('노출') && r.join('|').includes('클릭'));
+                    if(hIdx === -1) throw new Error("헤더(노출/클릭)를 찾을 수 없습니다.");
+                    
+                    const rows = aoa.slice(hIdx + 1).filter(r => r[0]).map((r, i) => ({
+                        no: i+1,
+                        product: String(r[1] || '배너'),
+                        date: String(r[2] || '-'),
+                        impressions: Number(String(r[3] || 0).replace(/,/g, '')),
+                        clicks: Number(String(r[4] || 0).replace(/,/g, '')),
+                        ctr: 0
+                    })).map(r => ({ ...r, ctr: r.impressions > 0 ? Number(((r.clicks / r.impressions) * 100).toFixed(2)) : 0 }));
+
+                    const summary = {
+                        name: "광고 성과 리포트",
+                        advertiser: clientKey.toUpperCase(),
+                        totalImpressions: rows.reduce((s, r) => s + r.impressions, 0),
+                        totalClicks: rows.reduce((s, r) => s + r.clicks, 0),
+                    };
+                    summary.avgCtr = summary.totalImpressions > 0 ? Number(((summary.totalClicks / summary.totalImpressions) * 100).toFixed(2)) : 0;
+
+                    setReportData({ summary, rows });
+                    addLog(`XLSX_PARSED: ${rows.length} rows.`);
+
+                    setIsAnalyzing(true);
+                    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+                    const res = await ai.models.generateContent({
+                        model: 'gemini-3-flash-preview',
+                        contents: `Analyze: ${summary.advertiser}, Imp ${summary.totalImpressions}, Clicks ${summary.totalClicks}, CTR ${summary.avgCtr}%. Korean, 2 sentences.`,
+                    });
+                    setAiInsight(res.text || "");
+                    setIsAnalyzing(false);
+                    addLog("ANALYZE_DONE: AI 인사이트 생성 완료.");
+                } catch (e) {
+                    addLog(`ERROR: ${e.message}`);
+                    alert(e.message);
+                } finally {
+                    setIsParsing(false);
+                }
+            };
+
+            const exportZip = async () => {
+                if (!clientKey) return alert("Client Key를 입력하세요.");
+                addLog("EXPORT_ZIP_CLICK: Generating structure...");
+                const JSZip = window.JSZip;
+                const zip = new JSZip();
+                
+                // data/{clientKey}/ 구조 생성
+                const dataFolder = zip.folder("data");
+                const clientFolder = dataFolder.folder(clientKey);
+
+                const monthMap = {};
+                reportData.rows.forEach(row => {
+                    const m = (row.date.match(/\d{4}[\.\-](\d{2})/) || ["", "01"])[1];
+                    if(!monthMap[m]) monthMap[m] = [];
+                    monthMap[m].push(row);
+                });
+
+                const monthsList = Object.keys(monthMap).sort().map(m => ({
+                    label: `2026-${m}`,
+                    file: `${m}.json`
+                }));
+
+                const indexJson = {
+                    summary: reportData.summary,
+                    aiInsight: aiInsight,
+                    months: monthsList,
+                    version: BUILD_VERSION
+                };
+
+                clientFolder.file("index.json", JSON.stringify(indexJson, null, 2));
+                Object.keys(monthMap).forEach(m => {
+                    clientFolder.file(`${m}.json`, JSON.stringify(monthMap[m], null, 2));
+                });
+
+                const content = await zip.generateAsync({ type: "blob" });
+                const url = URL.createObjectURL(content);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `data_package_${clientKey}.zip`;
+                a.click();
+                addLog(`ZIP_READY: data/${clientKey}/ 폴더 구조 패키징 완료.`);
+            };
+
+            return (
+                <div className="min-h-screen">
+                    <header className="sticky top-0 z-50 bg-white/95 border-b border-slate-200 px-6 py-4 flex justify-between items-center shadow-sm">
+                        <div className="flex items-center space-x-3">
+                            <ShieldCheck className="text-indigo-600" size={24} />
+                            <h1 className="font-black text-slate-900">INTERNAL OPS <span className="text-[10px] text-slate-300 ml-2 font-mono">V.{BUILD_VERSION}</span></h1>
+                        </div>
+                        <span className="px-3 py-1 bg-indigo-600 text-white text-[10px] font-black rounded-full uppercase tracking-widest">Admin Control</span>
+                    </header>
+
+                    <main className="max-w-7xl mx-auto p-8 space-y-8">
+                        <section className="bg-white rounded-[2.5rem] border border-slate-200 shadow-2xl overflow-hidden">
+                            <div className="bg-slate-900 text-white px-8 py-4 flex items-center justify-between">
+                                <h2 className="text-xs font-black uppercase tracking-widest flex items-center gap-2">
+                                    <Database size={14} /> Campaign Data Manager
+                                </h2>
+                                <span className="text-[10px] font-mono opacity-40">AUTO_PATH_ENABLED</span>
+                            </div>
+                            <div className="p-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-end">
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase">Client ID (URL Key)</label>
+                                    <input 
+                                        type="text" 
+                                        value={clientKey} 
+                                        onChange={(e) => setClientKey(e.target.value)}
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:ring-2 ring-indigo-500/20 outline-none" 
+                                        placeholder="예: snow, gh_korea"
+                                    />
+                                </div>
+                                <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 transition-all rounded-xl px-4 py-3 flex items-center justify-center gap-2 text-slate-700 font-bold text-sm">
+                                    <Upload size={18} /> {excelFile ? excelFile.name : "엑셀 업로드(.xlsx)"}
+                                    <input type="file" className="hidden" accept=".xlsx" onChange={handleFileUpload} />
+                                </label>
+                                <button onClick={runAnalysis} disabled={isParsing || !excelFile} className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl px-4 py-3 flex items-center justify-center gap-2 font-black text-sm shadow-xl shadow-indigo-100">
+                                    {isParsing ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} />} 분석 실행
+                                </button>
+                                <button onClick={exportZip} disabled={reportData.rows.length === 0} className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl px-4 py-3 flex items-center justify-center gap-2 font-black text-sm shadow-xl shadow-emerald-100">
+                                    <Archive size={18} /> 패키지(.zip) 내보내기
+                                </button>
+                            </div>
+                        </section>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                                <p className="text-[10px] font-black text-slate-400 uppercase">Impressions</p>
+                                <h3 className="text-2xl font-black text-indigo-600">{reportData.summary.totalImpressions.toLocaleString()}</h3>
+                            </div>
+                            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                                <p className="text-[10px] font-black text-slate-400 uppercase">Clicks</p>
+                                <h3 className="text-2xl font-black text-purple-600">{reportData.summary.totalClicks.toLocaleString()}</h3>
+                            </div>
+                            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                                <p className="text-[10px] font-black text-slate-400 uppercase">CTR (%)</p>
+                                <h3 className="text-2xl font-black text-emerald-600">{reportData.summary.avgCtr}%</h3>
+                            </div>
+                        </div>
+
+                        {aiInsight && (
+                            <div className="bg-indigo-50 border border-indigo-100 rounded-3xl p-8 flex items-start gap-4">
+                                <Sparkles className="text-indigo-600 mt-1" size={20} />
+                                <p className="text-sm font-medium text-indigo-900 leading-relaxed">{aiInsight}</p>
+                            </div>
+                        )}
+
+                        <section className="bg-slate-900 rounded-3xl overflow-hidden shadow-2xl">
+                            <button onClick={() => setShowDebug(!showDebug)} className="w-full px-8 py-4 flex items-center justify-between text-slate-400 hover:text-white transition-colors">
+                                <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest">
+                                    <Terminal size={14} /> Operations Debug Console
+                                </div>
+                                {showDebug ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                            </button>
+                            {showDebug && (
+                                <div className="px-8 pb-8">
+                                    <div className="bg-slate-950 p-6 debug-log-area no-scrollbar text-emerald-400 font-mono leading-relaxed">
+                                        {logs.map((log, i) => <div key={i} className="mb-1">{log}</div>)}
+                                        {logs.length === 0 && <div className="opacity-30">Waiting for events...</div>}
+                                    </div>
+                                </div>
+                            )}
+                        </section>
+                    </main>
+                    <footer className="text-center py-10 text-slate-300 text-[10px] font-black uppercase border-t border-slate-100">Ops Management System</footer>
+                </div>
+            );
+        };
+        createRoot(document.getElementById('root')).render(<InternalApp />);
+    </script>
+</body>
+</html>
