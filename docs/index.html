@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Premium Ad Report Dashboard</title>
 
+  <!-- Fonts -->
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap"
     rel="stylesheet"
@@ -16,11 +17,15 @@
       background-color: #f8fafc;
       -webkit-font-smoothing: antialiased;
     }
+
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
     @media print { .print\:hidden { display: none !important; } }
+
     .scrollbar-hide::-webkit-scrollbar { display: none; }
     .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
     .pdf-capture-area {
       background-color: #f8fafc !important;
       padding: 40px !important;
@@ -28,11 +33,12 @@
       margin: 0 auto !important;
     }
   </style>
+  <script type="module" crossorigin src="/Report-medicnc/assets/index-BbkKvSs2.js"></script>
 </head>
 
 <body>
   <div id="root"></div>
-  <!-- ✅ 소스 엔트리 (빌드 시 여기서 번들 생성) -->
-  <script type="module" src="/index.tsx"></script>
+
+  <!-- ✅ 이 한 줄이 있어야 Vite가 dist/assets를 생성합니다 -->
 </body>
 </html>
